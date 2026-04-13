@@ -1,780 +1,482 @@
-/**
- * ============================================================
- *  app.js  –  IKM Dashboard, RSU Islam Klaten
- * ============================================================
- *  React application – compiled by Babel in the browser.
- *  Uses globals from data.js:  LocalDB, DataManager, IKM, DEMO_CONFIG
- *  Uses Chart.js (loaded via CDN in index.html)
- *
- *  Component tree:
- *    <App>
- *      <AppHeader>       ← sticky bar, month selector, refresh btn
- *      <main>
- *        <ReportHeader>  ← Title + Month subheading
- *        <SummaryText>   ← body paragraph with bold data values
- *        <ScoreSection>  ← SVG gauge + stat cards
- *        <ChartsSection> ← bar chart + pie charts
- *        <AspectAnalysis>← numbered list of 9 aspects
- *        <Conclusion>    ← closing paragraph
- *      </main>
- *      <AppFooter>       ← online/offline status + cache timestamp
- * ============================================================
- */
+// RSU Islam Klaten — IKM Dashboard
+// React 18 + Chart.js | Google Sheets public CSV API
+// Local DB via localStorage | Auto-refresh daily
 
-/* global React, ReactDOM, Chart, DataManager, LocalDB, IKM, DEMO_CONFIG */
+const { useState, useEffect, useRef } = React;
+const SHEET_ID = '19nNWdVnYdW1vEv0E0zAzVBSNc5DQKebAia7LD3fMv_o';
+const DB_KEY = 'ikm_local_db';
+const DB_META_KEY = 'ikm_local_db_meta';
 
-const { useState, useEffect, useRef, useCallback } = React;
-
-// ============================================================
-// SCORE GAUGE  (SVG semicircle speedometer-style gauge)
-// ============================================================
-function ScoreGauge({ score }) {
-  // Geometry
-  const R = 78, cx = 100, cy = 98;
-  const pct = Math.min(Math.max(parseFloat(score) / 100, 0), 1);
-  const cat = IKM.getCategory(parseFloat(score));
-
-  // Arc endpoint: theta sweeps from π (left, score=0) → 0 (right, score=100)
-  // In SVG (y-down), the top-semicircle uses sweep-flag=0 (counterclockwise)
-  const theta = Math.PI * (1 - pct);
-  const ex = (cx + R * Math.cos(theta)).toFixed(2);
-  const ey = (cy - R * Math.sin(theta)).toFixed(2); // minus = invert Y axis
-
-  // SVG arc paths
-  const bgPath    = `M ${cx - R} ${cy} A ${R} ${R} 0 0 0 ${cx + R} ${cy}`;
-  const scorePath = pct > 0.005
-    ? `M ${cx - R} ${cy} A ${R} ${R} 0 0 0 ${ex} ${ey}`
-    : null;
-
-  return (
-    <div className="gauge-wrap">
-      <svg viewBox="0 0 200 115" className="w-full max-w-xs mx-auto block">
-        {/* Background track */}
-        <path d={bgPath} fill="none" stroke="#e5e7eb" strokeWidth="14" strokeLinecap="round" />
-
-        {/* Score arc */}
-        {scorePath && (
-          <path d={scorePath} fill="none" stroke={cat.color} strokeWidth="14" strokeLinecap="round" />
-        )}
-
-        {/* Needle-tip dot at end of arc */}
-        {scorePath && (
-          <circle cx={ex} cy={ey} r="6" fill={cat.color} stroke="#fff" strokeWidth="2" />
-        )}
-
-        {/* Large score number */}
-        <text
-          x={cx} y={cy - 14}
-          textAnchor="middle" fontSize="30" fontWeight="700"
-          fontFamily="'Playfair Display', serif" fill="#111827"
-        >
-          {parseFloat(score).toFixed(2)}
-        </text>
-
-        {/* "Nilai IKM" label */}
-        <text x={cx} y={cy} textAnchor="middle" fontSize="10" fill="#6b7280">
-          Nilai IKM
-        </text>
-
-        {/* Category badge */}
-        <text x={cx} y={cy + 14} textAnchor="middle" fontSize="11" fontWeight="700" fill={cat.color}>
-          Kategori {cat.grade} — {cat.label}
-        </text>
-
-        {/* Scale labels */}
-        <text x={cx - R + 2} y={cy + 20} textAnchor="middle" fontSize="8" fill="#9ca3af">0</text>
-        <text x={cx + R - 2} y={cy + 20} textAnchor="middle" fontSize="8" fill="#9ca3af">100</text>
-      </svg>
-    </div>
-  );
+function saveDB(data) {
+  try {
+    localStorage.setItem(DB_KEY, JSON.stringify(data));
+    localStorage.setItem(DB_META_KEY, JSON.stringify({ lastUpdated: new Date().toISOString(), sheets: Object.keys(data) }));
+    return true;
+  } catch (e) { return false; }
+}
+function loadDB() {
+  try {
+    const raw = localStorage.getItem(DB_KEY);
+    const meta = localStorage.getItem(DB_META_KEY);
+    if (!raw) return null;
+    return { data: JSON.parse(raw), meta: meta ? JSON.parse(meta) : null };
+  } catch (e) { return null; }
 }
 
-// ============================================================
-// BAR CHART  (aspect scores + linear regression trendline)
-// ============================================================
-function AspectBarChart({ labels, scores }) {
+async function fetchSheetNames() {
+  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/feed/worksheets/public/basic?alt=json`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('Tidak dapat mengambil daftar sheet');
+  const json = await res.json();
+  return (json.feed.entry || []).map(e => e.title.$t);
+}
+
+async function fetchSheetCSV(sheetName) {
+  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheetName)}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Gagal memuat sheet: ${sheetName}`);
+  return parseCSV(await res.text());
+}
+
+function parseCSV(text) {
+  return text.split('\n').map(line => {
+    const cells = []; let inQ = false, cell = '';
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c === '"' && !inQ) { inQ = true; }
+      else if (c === '"' && inQ && line[i + 1] === '"') { cell += '"'; i++; }
+      else if (c === '"' && inQ) { inQ = false; }
+      else if (c === ',' && !inQ) { cells.push(cell.trim()); cell = ''; }
+      else { cell += c; }
+    }
+    cells.push(cell.trim());
+    return cells;
+  });
+}
+
+function colIdx(letter) {
+  letter = letter.toUpperCase();
+  let idx = 0;
+  for (let i = 0; i < letter.length; i++) idx = idx * 26 + (letter.charCodeAt(i) - 64);
+  return idx;
+}
+function getCell(grid, row, colLetter) {
+  const r = grid[row - 1]; if (!r) return '';
+  return (r[colIdx(colLetter) - 1] || '').replace(/^"|"$/g, '').trim();
+}
+
+function extractData(grid, sheetName) {
+  const c = (r, l) => getCell(grid, r, l);
+  return {
+    title: c(2, 'B'),
+    month: c(3, 'B') || sheetName,
+    totalRespondents: c(25, 'C'),
+    finalScore: c(19, 'D'),
+    finalScoreText: c(19, 'E'),
+    aspects: [
+      { label: 'Kesesuaian Persyaratan', score: c(16, 'B'), text: c(17, 'B') },
+      { label: 'Pelayanan Kemudahan', score: c(16, 'C'), text: c(17, 'C') },
+      { label: 'Prosedur Kecepatan', score: c(16, 'D'), text: c(17, 'D') },
+      { label: 'Tarif Pelayanan', score: c(16, 'E'), text: c(17, 'E') },
+      { label: 'Kesesuaian Pelayanan', score: c(16, 'F'), text: c(17, 'F') },
+      { label: 'Kompetensi Petugas', score: c(16, 'G'), text: c(17, 'G') },
+      { label: 'Kesopanan & Keramahan', score: c(16, 'H'), text: c(17, 'H') },
+      { label: 'Sarana & Prasarana', score: c(16, 'I'), text: c(17, 'I') },
+      { label: 'Penanganan Aduan', score: c(16, 'J'), text: c(17, 'J') },
+    ],
+    demographics: scanDemographics(grid),
+  };
+}
+
+function scanDemographics(grid) {
+  const gender = [], edu = [], job = [];
+  for (let r = 0; r < grid.length; r++) {
+    const row = grid[r]; if (!row) continue;
+    for (let c = 0; c < row.length; c++) {
+      const raw = (row[c] || '').replace(/^"|"$/g, '').trim();
+      const lower = raw.toLowerCase();
+      const numStr = (row[c + 1] || row[c + 2] || '').replace(/^"|"$/g, '').trim();
+      const val = parseFloat(numStr.replace(/[^0-9.]/g, ''));
+      if (!isNaN(val) && val > 0) {
+        if (['laki-laki', 'laki laki', 'pria'].includes(lower))
+          gender.push({ label: 'Laki-Laki', value: val });
+        else if (['perempuan', 'wanita'].includes(lower))
+          gender.push({ label: 'Perempuan', value: val });
+        else if (['sd', 'smp', 'sma', 'smk', 'd1', 'd2', 'd3', 'd4', 's1', 's2', 's3', 'diploma', 'sarjana', 'magister', 'doktor', 'tidak sekolah', 'tidak tamat'].some(k => lower.includes(k)))
+          edu.push({ label: raw, value: val });
+        else if (['pns', 'tni', 'polri', 'swasta', 'pegawai', 'wiraswasta', 'petani', 'buruh', 'pelajar', 'mahasiswa', 'ibu rumah tangga', 'irt', 'pensiunan', 'lainnya'].some(k => lower.includes(k)))
+          job.push({ label: raw, value: val });
+      }
+    }
+  }
+  const dedup = arr => arr.filter((v, i, a) => a.findIndex(x => x.label.toLowerCase() === v.label.toLowerCase()) === i);
+  return { gender: dedup(gender), education: dedup(edu), occupation: dedup(job) };
+}
+
+function BarChart({ data }) {
   const canvasRef = useRef(null);
-  const chartRef  = useRef(null);
-
+  const chartRef = useRef(null);
   useEffect(() => {
-    if (!canvasRef.current || !labels?.length) return;
-
-    // Destroy existing chart before creating a new one
-    if (chartRef.current) { chartRef.current.destroy(); chartRef.current = null; }
-
-    const trendline = IKM.calcTrendline(scores);
-
-    chartRef.current = new Chart(canvasRef.current.getContext('2d'), {
+    if (!canvasRef.current || !data?.length) return;
+    if (chartRef.current) chartRef.current.destroy();
+    const values = data.map(d => parseFloat(d.score) || 0);
+    const avg = values.reduce((a, b) => a + b, 0) / values.length;
+    chartRef.current = new Chart(canvasRef.current, {
       type: 'bar',
       data: {
-        labels,
+        labels: data.map(d => d.label),
         datasets: [
           {
-            label: 'Nilai Aspek (%)',
-            data: scores,
-            backgroundColor: scores.map(s => IKM.getCategory(s).color + '33'),  // 20% opacity
-            borderColor:     scores.map(s => IKM.getCategory(s).color),
-            borderWidth: 2,
-            borderRadius: 7,
-            borderSkipped: false,
+            label: 'Nilai Aspek (%)', data: values,
+            backgroundColor: values.map(v => v >= 75 ? 'rgba(29,111,164,0.75)' : v >= 60 ? 'rgba(14,158,132,0.75)' : 'rgba(209,121,0,0.75)'),
+            borderColor: values.map(v => v >= 75 ? '#1d6fa4' : v >= 60 ? '#0e9e84' : '#d17900'),
+            borderWidth: 1.5, borderRadius: 6, borderSkipped: false
           },
           {
-            // Trendline – rendered as a Line on top of the bars (mixed chart)
-            label: 'Trendline (linear)',
-            data: trendline,
-            type: 'line',
-            borderColor: '#f59e0b',
-            borderWidth: 2.5,
-            borderDash: [7, 4],
-            pointRadius: 4,
-            pointBackgroundColor: '#f59e0b',
-            pointBorderColor: '#fff',
-            pointBorderWidth: 2,
-            fill: false,
-            tension: 0.35,
-            order: -1,   // Draw on top of bars
-          },
-        ],
+            label: 'Rata-rata', data: Array(values.length).fill(avg), type: 'line',
+            borderColor: '#e8454a', borderWidth: 2, borderDash: [6, 4], pointRadius: 0, fill: false, tension: 0
+          }
+        ]
       },
       options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        scales: {
-          y: {
-            min: 0, max: 100,
-            ticks: {
-              callback: v => v + '%',
-              font: { family: "'Nunito', sans-serif", size: 11 },
-            },
-            grid: { color: '#f3f4f6' },
-          },
-          x: {
-            ticks: {
-              font: { family: "'Nunito', sans-serif", size: 10 },
-              maxRotation: 28,
-              autoSkip: false,
-            },
-            grid: { display: false },
-          },
-        },
+        responsive: true, maintainAspectRatio: true,
         plugins: {
-          legend: {
-            labels: { font: { family: "'Nunito', sans-serif", size: 12 }, padding: 16 },
-          },
-          tooltip: {
-            titleFont: { family: "'Nunito', sans-serif" },
-            bodyFont:  { family: "'Nunito', sans-serif" },
-            callbacks: {
-              label: ctx => ` ${ctx.dataset.label}: ${Number(ctx.raw).toFixed(2)}%`,
-            },
-          },
+          legend: { display: true, position: 'top', labels: { font: { family: "'Plus Jakarta Sans'" }, boxWidth: 14, padding: 16 } },
+          tooltip: { callbacks: { label: ctx => ctx.dataset.label === 'Rata-rata' ? `Rata-rata: ${avg.toFixed(2)}%` : `${ctx.parsed.y.toFixed(2)}% — ${data[ctx.dataIndex]?.text || ''}` } }
         },
-      },
+        scales: {
+          y: { min: 0, max: 100, ticks: { callback: v => v + '%', font: { family: "'Plus Jakarta Sans'", size: 11 } }, grid: { color: 'rgba(0,50,100,0.06)' } },
+          x: { ticks: { font: { family: "'Plus Jakarta Sans'", size: 11 }, maxRotation: 30 }, grid: { display: false } }
+        }
+      }
     });
-
-    return () => { if (chartRef.current) { chartRef.current.destroy(); chartRef.current = null; } };
-  }, [JSON.stringify(labels), JSON.stringify(scores)]);
-
-  return (
-    <div style={{ position: 'relative', height: '300px', width: '100%' }}>
-      <canvas ref={canvasRef}></canvas>
-    </div>
-  );
+    return () => { if (chartRef.current) chartRef.current.destroy(); };
+  }, [data]);
+  return React.createElement('div', { className: 'chart-wrapper' }, React.createElement('canvas', { ref: canvasRef }));
 }
 
-// ============================================================
-// DOUGHNUT CHART  (for demographics)
-// ============================================================
-function DoughnutChart({ title, labels, values, colors }) {
+function PieChart({ data, colors }) {
   const canvasRef = useRef(null);
-  const chartRef  = useRef(null);
-
+  const chartRef = useRef(null);
   useEffect(() => {
-    if (!canvasRef.current || !labels?.length) return;
-    if (chartRef.current) { chartRef.current.destroy(); chartRef.current = null; }
-
-    const total = values.reduce((a, b) => a + b, 0);
-    if (total === 0) return;
-
-    chartRef.current = new Chart(canvasRef.current.getContext('2d'), {
+    if (!canvasRef.current || !data?.length) return;
+    if (chartRef.current) chartRef.current.destroy();
+    const total = data.reduce((a, b) => a + b.value, 0);
+    chartRef.current = new Chart(canvasRef.current, {
       type: 'doughnut',
       data: {
-        labels,
+        labels: data.map(d => d.label),
         datasets: [{
-          data: values,
-          backgroundColor: colors,
-          borderColor: '#fff',
-          borderWidth: 3,
-          hoverOffset: 10,
-        }],
+          data: data.map(d => d.value),
+          backgroundColor: colors || ['#1d6fa4', '#e8599a', '#0e9e84', '#d17900', '#7c3aed', '#0891b2', '#c53030', '#16a34a'],
+          borderWidth: 2, borderColor: '#ffffff', hoverOffset: 6
+        }]
       },
       options: {
-        responsive: true,
-        maintainAspectRatio: true,
-        cutout: '58%',
+        responsive: true, maintainAspectRatio: true, cutout: '60%',
         plugins: {
-          legend: {
-            position: 'bottom',
-            labels: {
-              font: { family: "'Nunito', sans-serif", size: 10.5 },
-              padding: 10,
-              usePointStyle: true,
-              pointStyleWidth: 8,
-            },
-          },
-          tooltip: {
-            callbacks: {
-              label: ctx => {
-                const pct = ((ctx.raw / total) * 100).toFixed(1);
-                return ` ${ctx.label}: ${ctx.raw} orang (${pct}%)`;
-              },
-            },
-          },
-        },
-      },
+          legend: { position: 'bottom', labels: { font: { family: "'Plus Jakarta Sans'", size: 11 }, padding: 10, boxWidth: 12 } },
+          tooltip: { callbacks: { label: ctx => `${ctx.label}: ${ctx.parsed} (${((ctx.parsed / total) * 100).toFixed(1)}%)` } }
+        }
+      }
     });
+    return () => { if (chartRef.current) chartRef.current.destroy(); };
+  }, [data, colors]);
+  return React.createElement('div', { className: 'pie-chart-wrapper' }, React.createElement('canvas', { ref: canvasRef }));
+}
 
-    return () => { if (chartRef.current) { chartRef.current.destroy(); chartRef.current = null; } };
-  }, [JSON.stringify(labels), JSON.stringify(values)]);
+function ThemeToggle() {
+  const [dark, setDark] = useState(() => document.documentElement.getAttribute('data-theme') === 'dark');
+  const toggle = () => { const nd = !dark; setDark(nd); document.documentElement.setAttribute('data-theme', nd ? 'dark' : 'light'); };
+  const Sun = () => React.createElement('svg', { width: 18, height: 18, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2 },
+    React.createElement('circle', { cx: 12, cy: 12, r: 5 }),
+    React.createElement('path', { d: 'M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42' }));
+  const Moon = () => React.createElement('svg', { width: 18, height: 18, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2 },
+    React.createElement('path', { d: 'M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z' }));
+  return React.createElement('button', { className: 'btn btn-icon btn-ghost', onClick: toggle, 'aria-label': 'Toggle dark mode' },
+    dark ? React.createElement(Sun) : React.createElement(Moon));
+}
 
-  return (
-    <div className="card p-5 flex flex-col">
-      <h4 className="text-center text-xs font-bold text-gray-500 uppercase tracking-widest mb-3">
-        {title}
-      </h4>
-      <div className="flex-1">
-        <canvas ref={canvasRef} style={{ maxHeight: '220px' }}></canvas>
-      </div>
-    </div>
+function StatRow({ label, value }) {
+  return React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 'var(--space-2) 0', borderBottom: '1px solid var(--color-divider)' } },
+    React.createElement('span', { style: { fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)', fontWeight: 500 } }, label),
+    React.createElement('span', { style: { fontSize: 'var(--text-sm)', fontWeight: 700, color: 'var(--color-text)', fontVariantNumeric: 'tabular-nums' } }, value || '—'));
+}
+
+// SVG Icon components
+const Svg = (d, ...paths) => React.createElement('svg', { width: 18, height: 18, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2 }, ...paths);
+const ActivityIcon = () => Svg(null, React.createElement('path', { d: 'M22 12h-4l-3 9L9 3l-3 9H2' }));
+const UsersIcon = () => Svg(null, React.createElement('path', { d: 'M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2' }), React.createElement('circle', { cx: 9, cy: 7, r: 4 }), React.createElement('path', { d: 'M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75' }));
+const BarIcon = () => Svg(null, React.createElement('line', { x1: 18, y1: 20, x2: 18, y2: 10 }), React.createElement('line', { x1: 12, y1: 20, x2: 12, y2: 4 }), React.createElement('line', { x1: 6, y1: 20, x2: 6, y2: 14 }), React.createElement('line', { x1: 2, y1: 20, x2: 22, y2: 20 }));
+const ListIcon = () => Svg(null, React.createElement('line', { x1: 8, y1: 6, x2: 21, y2: 6 }), React.createElement('line', { x1: 8, y1: 12, x2: 21, y2: 12 }), React.createElement('line', { x1: 8, y1: 18, x2: 21, y2: 18 }), React.createElement('line', { x1: 3, y1: 6, x2: 3.01, y2: 6 }), React.createElement('line', { x1: 3, y1: 12, x2: 3.01, y2: 12 }), React.createElement('line', { x1: 3, y1: 18, x2: 3.01, y2: 18 }));
+const InfoIcon = () => Svg(null, React.createElement('circle', { cx: 12, cy: 12, r: 10 }), React.createElement('line', { x1: 12, y1: 8, x2: 12, y2: 12 }), React.createElement('line', { x1: 12, y1: 16, x2: 12.01, y2: 16 }));
+const BookIcon = () => Svg(null, React.createElement('path', { d: 'M4 19.5A2.5 2.5 0 0 1 6.5 17H20' }), React.createElement('path', { d: 'M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z' }));
+const BriefcaseIcon = () => Svg(null, React.createElement('rect', { x: 2, y: 7, width: 20, height: 14, rx: 2, ry: 2 }), React.createElement('path', { d: 'M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16' }));
+const UserIcon = () => Svg(null, React.createElement('circle', { cx: 12, cy: 8, r: 4 }), React.createElement('path', { d: 'M20 21a8 8 0 1 0-16 0' }));
+const RefreshIcon = () => React.createElement('svg', { width: 14, height: 14, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2 }, React.createElement('path', { d: 'M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15' }));
+const CheckIcon = () => React.createElement('svg', { width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2 }, React.createElement('polyline', { points: '20 6 9 17 4 12' }));
+const WarnIcon = () => React.createElement('svg', { width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2 }, React.createElement('path', { d: 'M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01' }));
+const ChevIcon = () => React.createElement('svg', { width: 14, height: 14, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2.5 }, React.createElement('polyline', { points: '6 9 12 15 18 9' }));
+
+function Dashboard({ data: d }) {
+  const e = React.createElement;
+  const score = parseFloat(d.finalScore) || 0;
+
+  return e('div', null,
+    e('div', { className: 'grid-2', style: { marginBottom: 'var(--space-8)' } },
+      e('div', { className: 'card kpi-card' },
+        e('div', { style: { position: 'relative', zIndex: 1 } },
+          e('div', { style: { fontSize: 'var(--text-sm)', opacity: 0.85, marginBottom: 'var(--space-2)', fontWeight: 600 } }, 'Indeks Kepuasan Masyarakat (IKM)'),
+          e('div', { className: 'kpi-score' }, score ? score.toFixed(2) : d.finalScore || '—'),
+          e('div', { className: 'kpi-label' }, 'Nilai Kumulatif Kepuasan'),
+          e('div', { className: 'kpi-badge' }, e(CheckIcon), d.finalScoreText || 'Baik'),
+          e('div', { className: 'kpi-meta' }, `Kategori B — Predikat: ${d.finalScoreText || 'Baik'}`)
+        )
+      ),
+      e('div', { className: 'card' },
+        e('div', { className: 'card-title' }, e('span', { className: 'icon' }, e(UsersIcon)), 'Ringkasan Survei'),
+        e('div', { style: { display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' } },
+          e(StatRow, { label: 'Periode', value: d.month }),
+          e(StatRow, { label: 'Total Responden', value: d.totalRespondents }),
+          e(StatRow, { label: 'Skor IKM', value: d.finalScore }),
+          e(StatRow, { label: 'Predikat', value: d.finalScoreText }),
+        )
+      )
+    ),
+
+    e('div', { className: 'body-section' },
+      e('p', null, `Sebagai wujud komitmen berkelanjutan dalam menjaga kualitas layanan, RSU Islam Klaten secara berkala menyelenggarakan Survei Kepuasan Masyarakat. Pada periode ${d.month}, survei yang melibatkan ${d.totalRespondents} responden ini menghasilkan nilai Indeks Kepuasan Masyarakat (IKM) sebesar ${d.finalScore}. Skor tersebut menempatkan mutu pelayanan kami pada Kategori B dengan predikat kinerja Baik.`),
+      e('p', null, `Pencapaian ini sekaligus membuktikan bahwa RSU Islam Klaten telah berhasil memenuhi target yang direncanakan, di mana target kepuasan pelanggan pada bulan ${d.month} mencapai predikat ${d.finalScoreText}.`)
+    ),
+
+    e('hr', { className: 'divider' }),
+
+    e('h2', { className: 'section-heading' }, 'Grafik Nilai Aspek Pelayanan'),
+    e('p', { className: 'section-subheading' }, 'Rincian nilai per aspek pelayanan (maks. 100%). Garis merah = rata-rata keseluruhan.'),
+    e('div', { className: 'card', style: { marginBottom: 'var(--space-8)' } },
+      e('div', { className: 'card-title' }, e('span', { className: 'icon' }, e(BarIcon)), 'Nilai Aspek Layanan'),
+      e(BarChart, { data: d.aspects })
+    ),
+
+    e('h2', { className: 'section-heading' }, 'Data Responden'),
+    e('p', { className: 'section-subheading' }, 'Profil demografis responden survei kepuasan.'),
+    e('div', { className: 'grid-3', style: { marginBottom: 'var(--space-8)' } },
+      e('div', { className: 'card' },
+        e('div', { className: 'card-title' }, e('span', { className: 'icon' }, e(UserIcon)), 'Jenis Kelamin'),
+        d.demographics.gender.length > 0
+          ? e(PieChart, { data: d.demographics.gender, colors: d.demographics.gender.map(g => g.label.toLowerCase().includes('laki') ? '#1d6fa4' : '#e8599a') })
+          : e('p', { style: { fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)', padding: 'var(--space-4) 0' } }, 'Data tidak ditemukan di sheet ini.')
+      ),
+      e('div', { className: 'card' },
+        e('div', { className: 'card-title' }, e('span', { className: 'icon' }, e(BookIcon)), 'Pendidikan'),
+        d.demographics.education.length > 0
+          ? e(PieChart, { data: d.demographics.education })
+          : e('p', { style: { fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)', padding: 'var(--space-4) 0' } }, 'Data tidak ditemukan di sheet ini.')
+      ),
+      e('div', { className: 'card' },
+        e('div', { className: 'card-title' }, e('span', { className: 'icon' }, e(BriefcaseIcon)), 'Pekerjaan'),
+        d.demographics.occupation.length > 0
+          ? e(PieChart, { data: d.demographics.occupation })
+          : e('p', { style: { fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)', padding: 'var(--space-4) 0' } }, 'Data tidak ditemukan di sheet ini.')
+      )
+    ),
+
+    e('hr', { className: 'divider' }),
+
+    e('h2', { className: 'section-heading' }, 'Analisis Unsur Pelayanan'),
+    e('p', { className: 'section-subheading' }, `Secara akumulatif, nilai ${d.finalScore} mencerminkan performa layanan yang solid. Berikut rincian capaian per aspek:`),
+    e('div', { className: 'grid-2', style: { marginBottom: 'var(--space-8)' } },
+      e('div', { className: 'card' },
+        e('div', { className: 'card-title' }, e('span', { className: 'icon' }, e(ListIcon)), 'Rincian Nilai Aspek'),
+        e('ul', { className: 'aspect-list' },
+          d.aspects.map((a, i) =>
+            e('li', { key: i, className: 'aspect-item' },
+              e('span', { className: 'aspect-num' }, i + 1),
+              e('span', { className: 'aspect-name' }, a.label),
+              e('div', { className: 'aspect-score-wrap' },
+                e('span', { className: 'aspect-score-num' }, a.score || '—'),
+                e('span', { className: 'aspect-score-label' }, a.text || '—')
+              )
+            )
+          )
+        )
+      ),
+      e('div', { className: 'card' },
+        e('div', { className: 'card-title' }, e('span', { className: 'icon' }, e(InfoIcon)), 'Kesimpulan'),
+        e('div', { style: { display: 'flex', flexDirection: 'column', gap: 'var(--space-4)', height: '100%' } },
+          e('p', { style: { fontSize: 'var(--text-base)', color: 'var(--color-text)', lineHeight: 1.75 } },
+            'Meskipun sebagian besar unsur pelayanan sudah berjalan optimal dan masuk dalam kategori baik, RSU Islam Klaten akan terus melakukan langkah-langkah strategis untuk meningkatkan efisiensi waktu layanan demi kenyamanan dan kepuasan pasien yang lebih baik.'),
+          e('div', { style: { marginTop: 'auto', padding: 'var(--space-4)', background: 'var(--color-primary-light)', borderRadius: 'var(--radius-md)' } },
+            e('div', { style: { fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 'var(--space-1)' } }, 'Skor Keseluruhan'),
+            e('div', { style: { fontSize: 'var(--text-xl)', fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--color-primary)', lineHeight: 1 } }, d.finalScore || '—'),
+            e('div', { style: { fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' } }, d.finalScoreText || '')
+          )
+        )
+      )
+    )
   );
 }
 
-// ============================================================
-// LOADING / ERROR STATES
-// ============================================================
-function LoadingState({ message }) {
-  return (
-    <div className="flex flex-col items-center justify-center py-28 gap-5">
-      <div className="spinner"></div>
-      <p className="text-gray-400 text-sm font-medium">{message || 'Memuat data…'}</p>
-    </div>
-  );
-}
-
-function ErrorState({ message, onRetry }) {
-  return (
-    <div className="card p-6 border-l-4 border-red-400 bg-red-50 flex gap-4 items-start">
-      <span className="text-2xl mt-0.5">⚠️</span>
-      <div className="flex-1">
-        <p className="font-bold text-red-800 mb-1">Gagal Memuat Data</p>
-        <p className="text-red-600 text-sm leading-relaxed">{message}</p>
-        <p className="text-red-400 text-xs mt-2">
-          Pastikan Google Sheets sudah dipublikasikan dan nama sheet sesuai nama bulan Indonesia.
-        </p>
-      </div>
-      {onRetry && (
-        <button className="btn-solid shrink-0 text-xs" onClick={onRetry}>
-          ↩ Coba Lagi
-        </button>
-      )}
-    </div>
-  );
-}
-
-// ============================================================
-// APP HEADER  (sticky top bar)
-// ============================================================
-function AppHeader({ months, selectedMonth, onMonthChange, onRefresh, refreshing, online }) {
-  return (
-    <header className="app-header px-4 py-5 sm:px-8 no-print">
-      <div className="max-w-5xl mx-auto">
-        {/* Row 1: branding + controls */}
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-
-          {/* Brand */}
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center text-xl font-extrabold text-white flex-shrink-0 border border-white/30">
-              ☪
-            </div>
-            <div>
-              <p className="text-white/60 text-[10px] uppercase tracking-widest leading-none">Dashboard IKM</p>
-              <p className="text-white font-bold text-sm leading-snug">RSU Islam Klaten</p>
-            </div>
-          </div>
-
-          {/* Controls */}
-          <div className="flex items-center gap-2 flex-wrap">
-            {/* Online/offline badge */}
-            <span className="text-white/70 text-xs hidden sm:flex items-center">
-              <span className={`status-dot ${online ? 'online' : 'offline'}`}></span>
-              {online ? 'Online' : 'Offline'}
-            </span>
-
-            {/* Month selector */}
-            {months.length > 0 && (
-              <select
-                className="month-selector"
-                value={selectedMonth}
-                onChange={e => onMonthChange(e.target.value)}
-              >
-                {months.map(m => <option key={m} value={m}>{m}</option>)}
-              </select>
-            )}
-
-            {/* Refresh button */}
-            <button
-              className="btn-glass"
-              onClick={onRefresh}
-              disabled={refreshing || !online}
-              title={online ? 'Ambil data terbaru dari Google Sheets' : 'Tidak ada koneksi internet'}
-            >
-              {refreshing
-                ? <><span style={{ display: 'inline-block', width: 12, height: 12, border: '2px solid rgba(255,255,255,0.4)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.75s linear infinite' }}></span> Memuat…</>
-                : <>⟳ Perbarui Data</>
-              }
-            </button>
-          </div>
-        </div>
-      </div>
-    </header>
-  );
-}
-
-// ============================================================
-// REPORT HEADER  (title + month, inside the page content)
-// ============================================================
-function ReportHeader({ title, month }) {
-  return (
-    <div className="text-center py-7 px-4">
-      <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 leading-tight">
-        {title}
-      </h1>
-      <p className="text-brand-700 font-semibold mt-2 text-lg tracking-wide">{month}</p>
-      <span className="report-accent-line"></span>
-    </div>
-  );
-}
-
-// ============================================================
-// SUMMARY TEXT  (the paragraph body with bold data values)
-// ============================================================
-function SummaryText({ month, totalRespondents, finalScore, finalScoreText }) {
-  const cat = IKM.getCategory(finalScore);
-  const B = ({ children }) => <strong className="data-highlight">{children}</strong>;
-
-  return (
-    <div className="card p-6 sm:p-8 space-y-4 text-gray-700 text-[15px] leading-[1.85]">
-      <p>
-        Sebagai wujud komitmen berkelanjutan dalam menjaga kualitas layanan, RSU Islam Klaten
-        secara berkala menyelenggarakan Survei Kepuasan Masyarakat. Pada periode{' '}
-        <B>{month}</B>, survei yang melibatkan <B>{totalRespondents} responden</B> ini
-        menghasilkan nilai Indeks Kepuasan Masyarakat (IKM) sebesar{' '}
-        <B>{parseFloat(finalScore).toFixed(2)}</B>. Skor tersebut menempatkan mutu
-        pelayanan kami pada <B>Kategori {cat.grade}</B> dengan predikat kinerja{' '}
-        <B>{cat.label}</B>.
-      </p>
-      <p>
-        Pencapaian ini sekaligus membuktikan bahwa RSU Islam Klaten telah berhasil memenuhi
-        target yang direncanakan, di mana target kepuasan pelanggan pada bulan <B>{month}</B> mencapai
-        predikat <B>{finalScoreText || cat.label}</B>.
-      </p>
-    </div>
-  );
-}
-
-// ============================================================
-// SCORE SECTION  (gauge + 3 stat cards)
-// ============================================================
-function ScoreSection({ finalScore, finalScoreText, totalRespondents }) {
-  const cat = IKM.getCategory(finalScore);
-  return (
-    <div className="card card-elevated">
-      <div className="px-6 pt-6 pb-2 text-center border-b border-gray-100">
-        <h2 className="text-lg font-bold text-gray-800">
-          Nilai Kumulatif Indeks Kepuasan Masyarakat
-        </h2>
-        <p className="text-xs text-gray-400 mt-1">
-          Skala 0–100 · Permenpan RB No. 14 Tahun 2017
-        </p>
-      </div>
-      <div className="p-6">
-        <ScoreGauge score={finalScore} />
-        {/* Three stat cards below the gauge */}
-        <div className="mt-5 grid grid-cols-3 gap-3 text-center">
-          <div className="bg-slate-50 rounded-xl p-3 border border-slate-100">
-            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Responden</p>
-            <p className="text-2xl font-extrabold text-gray-800 mt-1">{totalRespondents}</p>
-          </div>
-          <div className="rounded-xl p-3 border" style={{ background: cat.bg, borderColor: cat.color + '40' }}>
-            <p className="text-[10px] font-bold uppercase tracking-wider" style={{ color: cat.color }}>Kategori</p>
-            <p className="text-2xl font-extrabold mt-1" style={{ color: cat.color }}>{cat.grade}</p>
-          </div>
-          <div className="bg-slate-50 rounded-xl p-3 border border-slate-100">
-            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Predikat</p>
-            <p className="text-sm font-extrabold text-gray-800 mt-1 leading-snug">{finalScoreText || cat.label}</p>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ============================================================
-// CHARTS SECTION  (bar chart + demographics pie charts)
-// ============================================================
-function ChartsSection({ data }) {
-  const showDemographics = DEMO_CONFIG.enabled && data.demographics;
-
-  return (
-    <div className="space-y-6">
-      {/* ── Bar chart ─────────────────────────────────────── */}
-      <div className="card p-6">
-        <h2 className="text-lg font-bold text-gray-800 mb-0.5">
-          Rincian Nilai Aspek Pelayanan
-        </h2>
-        <p className="text-xs text-gray-400 mb-5">
-          Nilai per aspek (%) dengan trendline regresi linear · Maks. 100%
-        </p>
-        <AspectBarChart labels={data.aspectLabels} scores={data.aspectScores} />
-      </div>
-
-      {/* ── Demographics pie charts ─────────────────────── */}
-      <div>
-        <div className="divider my-6">
-          <span className="divider-label">Data Responden</span>
-        </div>
-
-        {showDemographics ? (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <DoughnutChart
-              title="Jenis Kelamin"
-              labels={data.demographics.gender.labels}
-              values={data.demographics.gender.values}
-              colors={data.demographics.gender.colors}
-            />
-            <DoughnutChart
-              title="Tingkat Pendidikan"
-              labels={data.demographics.education.labels}
-              values={data.demographics.education.values}
-              colors={data.demographics.education.colors}
-            />
-            <DoughnutChart
-              title="Jenis Pekerjaan"
-              labels={data.demographics.occupation.labels}
-              values={data.demographics.occupation.values}
-              colors={data.demographics.occupation.colors}
-            />
-          </div>
-        ) : (
-          /* Placeholder shown until DEMO_CONFIG is configured */
-          <div className="card p-8 text-center border-2 border-dashed border-gray-200 bg-gray-50">
-            <p className="text-4xl mb-3">📊</p>
-            <p className="font-bold text-gray-600 text-sm">Grafik Demografi Responden</p>
-            <p className="text-xs text-gray-400 mt-2 max-w-md mx-auto leading-relaxed">
-              Pie chart jenis kelamin, pendidikan, dan pekerjaan belum dikonfigurasi.{' '}
-              Buka <code className="bg-gray-200 px-1 py-0.5 rounded text-gray-600">data.js</code>,
-              isi referensi sel pada <code className="bg-gray-200 px-1 py-0.5 rounded text-gray-600">DEMO_CONFIG</code>,
-              lalu ubah <code className="bg-gray-200 px-1 py-0.5 rounded text-gray-600">enabled: true</code>.
-            </p>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ============================================================
-// ASPECT ANALYSIS  (numbered list of 9 aspects with scores)
-// ============================================================
-// Default aspect names used as fallback if sheet labels are empty
-const DEFAULT_ASPECT_NAMES = [
-  'Kesesuaian Persyaratan',
-  'Kemudahan Pelayanan',
-  'Kecepatan Pelayanan',
-  'Tarif Pelayanan',
-  'Kesesuaian Pelayanan',
-  'Kompetensi Petugas',
-  'Kesopanan dan Keramahan',
-  'Sarana dan Prasarana',
-  'Penanganan Aduan',
-];
-
-function AspectAnalysis({ finalScore, aspectScores, aspectTexts, aspectLabels }) {
-  return (
-    <div className="card p-6 sm:p-8">
-      <h2 className="text-xl font-bold text-gray-900 mb-1">Analisis Unsur Pelayanan</h2>
-      <p className="text-gray-600 text-sm mb-6 leading-relaxed">
-        Secara akumulatif, nilai{' '}
-        <strong className="data-highlight">{parseFloat(finalScore).toFixed(2)}</strong>{' '}
-        mencerminkan performa layanan yang solid. Berikut adalah rincian capaian per aspek:
-      </p>
-
-      <div>
-        {DEFAULT_ASPECT_NAMES.map((defaultName, i) => {
-          const score = aspectScores[i] ?? 0;
-          const text  = aspectTexts[i]  || '';
-          const label = aspectLabels[i] || defaultName;
-          const cat   = IKM.getCategory(score);
-
-          return (
-            <div key={i} className="aspect-row">
-              {/* Number bubble */}
-              <span className="aspect-num">{i + 1}</span>
-
-              {/* Name + description */}
-              <div className="flex-1 min-w-0">
-                <p className="font-semibold text-gray-800 text-sm leading-snug">{label}</p>
-                {text && <p className="text-xs text-gray-400 mt-0.5">{text}</p>}
-              </div>
-
-              {/* Score pill */}
-              <span className="score-pill" style={{ color: cat.color, background: cat.bg }}>
-                {parseFloat(score).toFixed(2)}%
-              </span>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-// ============================================================
-// CONCLUSION
-// ============================================================
-function Conclusion() {
-  return (
-    <div className="card p-6 sm:p-8 border-l-4 border-brand-600 bg-brand-50/30">
-      <h2 className="text-lg font-bold text-gray-900 mb-3">Kesimpulan</h2>
-      <p className="text-gray-700 text-[15px] leading-[1.85]">
-        Meskipun sebagian besar unsur pelayanan sudah berjalan optimal dan masuk dalam
-        kategori baik, RSU Islam Klaten akan terus melakukan langkah-langkah strategis
-        untuk meningkatkan efisiensi waktu layanan demi kenyamanan dan kepuasan pasien
-        yang lebih baik.
-      </p>
-    </div>
-  );
-}
-
-// ============================================================
-// APP FOOTER  (status bar at the bottom)
-// ============================================================
-function AppFooter({ cachedAt, online, selectedMonth }) {
-  const fmt = ts =>
-    ts ? new Date(ts).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }) : '—';
-
-  return (
-    <footer className="app-footer no-print">
-      <span>
-        <span className={`status-dot ${online ? 'online' : 'offline'}`}></span>
-        {online ? 'Terhubung ke Internet' : 'Mode Offline — Menampilkan data tersimpan lokal'}
-      </span>
-      <span>
-        {selectedMonth && `Periode: ${selectedMonth}`}
-        {cachedAt && ` · Diperbarui: ${fmt(cachedAt)}`}
-      </span>
-    </footer>
-  );
-}
-
-// ============================================================
-// MAIN APP  (state management + layout)
-// ============================================================
 function App() {
-  const [months,      setMonths]      = useState([]);
-  const [selected,    setSelected]    = useState('');
-  const [data,        setData]        = useState(null);
-  const [cachedAt,    setCachedAt]    = useState(null);
-  const [phase,       setPhase]       = useState('init');  // 'init'|'months'|'data'|'ready'|'error'
-  const [errMsg,      setErrMsg]      = useState('');
-  const [refreshing,  setRefreshing]  = useState(false);
-  const [online,      setOnline]      = useState(navigator.onLine);
+  const [sheets, setSheets] = useState([]);
+  const [activeSheet, setActiveSheet] = useState('');
+  const [sheetData, setSheetData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [dbMeta, setDbMeta] = useState(null);
+  const [msg, setMsg] = useState(null);
+  const e = React.createElement;
 
-  // ── Track network status ───────────────────────────────
   useEffect(() => {
-    const goOn  = () => setOnline(true);
-    const goOff = () => setOnline(false);
-    window.addEventListener('online',  goOn);
-    window.addEventListener('offline', goOff);
-    return () => { window.removeEventListener('online', goOn); window.removeEventListener('offline', goOff); };
+    const on = () => setIsOnline(true), off = () => setIsOnline(false);
+    window.addEventListener('online', on); window.addEventListener('offline', off);
+    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
   }, []);
 
-  // ── Load data for a selected month ────────────────────
-  const loadMonth = useCallback(async (month, force = false) => {
-    if (!month) return;
-    setPhase('data');
-    setErrMsg('');
-    try {
-      const result = await DataManager.getSheetData(month, force);
-      setData(result);
-      setCachedAt(result._cachedAt);
-      setPhase('ready');
-
-      // Background auto-refresh if stale (without blocking the UI)
-      if (!force && LocalDB.isStale(month) && online) {
-        setTimeout(async () => {
-          try {
-            const fresh = await DataManager.getSheetData(month, true);
-            setData(fresh);
-            setCachedAt(fresh._cachedAt);
-          } catch (e) { /* silent background fail */ }
-        }, 100);
-      }
-    } catch (e) {
-      // Try to serve from cache even if live fetch failed
-      const cached = LocalDB.getSheet(month);
-      if (cached?.data) {
-        setData({ ...cached.data, _fromCache: true });
-        setCachedAt(cached.savedAt);
-        setPhase('ready');
-      } else {
-        setErrMsg(e.message || 'Terjadi kesalahan.');
-        setPhase('error');
-      }
-    }
-  }, [online]);
-
-  // ── Startup: discover available months ────────────────
   useEffect(() => {
-    const boot = async () => {
-      setPhase('months');
+    const stored = loadDB();
+    if (stored?.meta) setDbMeta(stored.meta);
+  }, []);
+
+  useEffect(() => { initSheets(); }, [isOnline]);
+
+  useEffect(() => {
+    if (!isOnline || !dbMeta?.lastUpdated) return;
+    if ((Date.now() - new Date(dbMeta.lastUpdated)) / 3600000 >= 24) fetchAll();
+  }, []);
+
+  async function initSheets() {
+    if (isOnline) {
       try {
-        const found = await DataManager.getAvailableSheets();
-        if (found.length === 0) {
-          setPhase('error');
-          setErrMsg('Tidak ada lembar ditemukan. Pastikan tab sheet dinamai sesuai nama bulan Indonesia (Januari, Februari, …) dan Google Sheets sudah dibagikan secara publik.');
-          return;
-        }
-        setMonths(found);
-        const defaultMonth = found[found.length - 1]; // Most recent = last item
-        setSelected(defaultMonth);
-        await loadMonth(defaultMonth);
-      } catch (e) {
-        // Fully offline: try to use any locally cached data
-        const cached = LocalDB.getCachedSheetNames();
-        if (cached.length > 0) {
-          setMonths(cached);
-          const defaultMonth = cached[cached.length - 1];
-          setSelected(defaultMonth);
-          await loadMonth(defaultMonth);
-        } else {
-          setPhase('error');
-          setErrMsg(e.message || 'Tidak dapat terhubung ke Google Sheets dan tidak ada data lokal tersedia.');
-        }
-      }
-    };
-    boot();
-  }, []);                 // ← intentionally empty deps: run once on mount
+        const list = await fetchSheetNames();
+        setSheets(list);
+        setActiveSheet(prev => prev || list[list.length - 1] || '');
+      } catch { fallbackLocal(); }
+    } else { fallbackLocal(); }
+  }
 
-  // ── Month selector change ──────────────────────────────
-  const handleMonthChange = useCallback((month) => {
-    setSelected(month);
-    loadMonth(month);
-  }, [loadMonth]);
-
-  // ── Manual refresh button ──────────────────────────────
-  const handleRefresh = useCallback(async () => {
-    if (!online) return;
-    setRefreshing(true);
-    try {
-      // Re-discover months + refresh current month's data
-      const found = await DataManager.discoverAvailableMonths();
-      if (found.length > 0) setMonths(found);
-      if (selected) await loadMonth(selected, true);
-    } catch (e) {
-      setErrMsg(e.message);
-    } finally {
-      setRefreshing(false);
+  function fallbackLocal() {
+    const stored = loadDB();
+    if (stored?.data) {
+      const keys = Object.keys(stored.data);
+      setSheets(keys);
+      setActiveSheet(prev => prev || keys[keys.length - 1] || '');
+    } else {
+      setError('Tidak ada koneksi & tidak ada data lokal. Hubungkan ke internet untuk pertama kali.');
     }
-  }, [online, selected, loadMonth]);
+  }
 
-  // ── Render ─────────────────────────────────────────────
-  return (
-    <div className="flex flex-col min-h-screen">
-      <AppHeader
-        months={months}
-        selectedMonth={selected}
-        onMonthChange={handleMonthChange}
-        onRefresh={handleRefresh}
-        refreshing={refreshing}
-        online={online}
-      />
+  useEffect(() => { if (activeSheet) loadSheet(activeSheet); }, [activeSheet, isOnline]);
 
-      <main className="flex-1 max-w-5xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-5">
+  async function loadSheet(name) {
+    setLoading(true); setError(''); setSheetData(null);
+    if (isOnline) {
+      try {
+        const grid = await fetchSheetCSV(name);
+        const data = extractData(grid, name);
+        setSheetData(data);
+        const db = loadDB()?.data || {};
+        const updated = { ...db, [name]: { grid, data, fetchedAt: new Date().toISOString() } };
+        saveDB(updated);
+      } catch (err) {
+        const db = loadDB()?.data;
+        if (db?.[name]) { setSheetData(db[name].data); setError('Menggunakan data cache lokal.'); }
+        else setError(`Gagal: ${err.message}`);
+      }
+    } else {
+      const db = loadDB()?.data;
+      if (db?.[name]) setSheetData(db[name].data);
+      else setError('Tidak ada data lokal. Hubungkan ke internet.');
+    }
+    setLoading(false);
+  }
 
-        {/* ── Loading phases ─────────────────────────────── */}
-        {(phase === 'init' || phase === 'months') && (
-          <LoadingState message="Mendeteksi lembar data yang tersedia di Google Sheets…" />
-        )}
-        {phase === 'data' && (
-          <LoadingState message={`Memuat data survei untuk bulan ${selected}…`} />
-        )}
+  async function fetchAll() {
+    if (!isOnline) { showMsg('Tidak ada koneksi internet.', false); return; }
+    showMsg('Mengambil semua data...', null);
+    try {
+      const list = await fetchSheetNames();
+      const allData = {};
+      for (const name of list) {
+        const grid = await fetchSheetCSV(name);
+        allData[name] = { grid, data: extractData(grid, name), fetchedAt: new Date().toISOString() };
+      }
+      saveDB(allData);
+      setSheets(list);
+      const stored = loadDB();
+      if (stored?.meta) setDbMeta(stored.meta);
+      if (activeSheet && allData[activeSheet]) setSheetData(allData[activeSheet].data);
+      showMsg('✓ Semua data berhasil diperbarui!', true);
+    } catch (err) { showMsg(`Gagal: ${err.message}`, false); }
+  }
 
-        {/* ── Error ─────────────────────────────────────── */}
-        {phase === 'error' && (
-          <ErrorState message={errMsg} onRetry={handleRefresh} />
-        )}
+  function showMsg(text, success) {
+    setMsg({ text, success });
+    if (success !== null) setTimeout(() => setMsg(null), 4000);
+  }
 
-        {/* ── Main report content ────────────────────────── */}
-        {phase === 'ready' && data && (
-          <>
-            {/* Offline warning banner */}
-            {!online && (
-              <div className="card p-4 border border-amber-200 bg-amber-50 flex items-center gap-3 text-sm text-amber-800">
-                <span className="text-xl">📶</span>
-                <span>
-                  Anda sedang <strong>offline</strong>. Data yang ditampilkan berasal dari cache lokal
-                  (tersimpan pada {cachedAt ? new Date(cachedAt).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' }) : '—'}).
-                </span>
-              </div>
-            )}
+  return e('div', null,
+    e('header', { className: 'site-header' },
+      e('div', { className: 'container' },
+        e('div', { className: 'header-inner' },
+          e('a', { className: 'logo', href: '#' },
+            e('div', { className: 'logo-icon' }, e(ActivityIcon)),
+            e('div', null,
+              e('div', { className: 'logo-text' }, 'RSU Islam Klaten'),
+              e('div', { className: 'logo-sub' }, 'Dashboard IKM')
+            )
+          ),
+          e('div', { className: 'header-actions' },
+            e('span', { className: `status-badge ${isOnline ? 'status-online' : 'status-offline'}` },
+              e('span', { className: 'status-dot' }), isOnline ? 'Online' : 'Offline'),
+            isOnline && e('button', { className: 'btn btn-sm btn-secondary', onClick: fetchAll }, e(RefreshIcon), 'Perbarui Data'),
+            e(ThemeToggle)
+          )
+        )
+      )
+    ),
 
-            {/* Title + month subheading */}
-            <ReportHeader title={data.title} month={data.month || selected} />
+    e('section', { className: 'page-hero' },
+      e('div', { className: 'container' },
+        e('div', { className: 'page-hero-inner' },
+          e('div', null,
+            e('h1', { className: 'page-hero-title' }, sheetData?.title || 'Survei Kepuasan Masyarakat'),
+            e('p', { className: 'page-hero-subtitle' }, sheetData?.month ? `Periode: ${sheetData.month}` : 'Indeks Kepuasan Masyarakat — RSU Islam Klaten')
+          ),
+          sheets.length > 0 && e('div', { className: 'month-selector' },
+            e('label', { htmlFor: 'month-select', style: { fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--color-text-muted)', whiteSpace: 'nowrap' } }, 'Pilih Periode:'),
+            e('div', { className: 'select-wrapper' },
+              e('select', { id: 'month-select', value: activeSheet, onChange: ev => setActiveSheet(ev.target.value) },
+                sheets.map(s => e('option', { key: s, value: s }, s))),
+              e('span', { className: 'select-arrow' }, e(ChevIcon))
+            )
+          )
+        )
+      )
+    ),
 
-            {/* Body paragraph */}
-            <SummaryText
-              month={data.month || selected}
-              totalRespondents={data.totalRespondents}
-              finalScore={data.finalScore}
-              finalScoreText={data.finalScoreText}
-            />
+    e('main', { className: 'main-content' },
+      e('div', { className: 'container' },
+        msg && e('div', { className: msg.success ? 'success-banner' : 'offline-banner' },
+          msg.success ? e(CheckIcon) : e(WarnIcon), msg.text),
+        error && e('div', { className: 'offline-banner' }, e(WarnIcon), error),
+        loading
+          ? e('div', { className: 'grid-2', style: { marginBottom: 'var(--space-6)' } },
+            e('div', { className: 'card skeleton skeleton-block', style: { minHeight: 160 } }),
+            e('div', { className: 'card skeleton skeleton-block', style: { minHeight: 160 } }))
+          : sheetData && e(Dashboard, { data: sheetData })
+      )
+    ),
 
-            {/* ─────── GRAPH AREA ─────── */}
-            <div className="divider my-2"><span className="divider-label">Grafik & Visualisasi</span></div>
-
-            {/* Score gauge */}
-            <ScoreSection
-              finalScore={data.finalScore}
-              finalScoreText={data.finalScoreText}
-              totalRespondents={data.totalRespondents}
-            />
-
-            {/* Bar chart + pie charts */}
-            <ChartsSection data={data} />
-
-            {/* ─────── ANALISIS ─────── */}
-            <div className="divider my-2"><span className="divider-label">Analisis Unsur Pelayanan</span></div>
-
-            {/* Aspect breakdown list */}
-            <AspectAnalysis
-              finalScore={data.finalScore}
-              aspectScores={data.aspectScores}
-              aspectTexts={data.aspectTexts}
-              aspectLabels={data.aspectLabels}
-            />
-
-            {/* Conclusion */}
-            <Conclusion />
-          </>
-        )}
-      </main>
-
-      <AppFooter cachedAt={cachedAt} online={online} selectedMonth={selected} />
-    </div>
+    e('footer', { className: 'site-footer' },
+      e('div', { className: 'container' },
+        e('p', null, '© RSU Islam Klaten — Dashboard Indeks Kepuasan Masyarakat'),
+        dbMeta?.lastUpdated && e('p', { style: { marginTop: '0.25rem' } },
+          `Data lokal terakhir diperbarui: ${new Date(dbMeta.lastUpdated).toLocaleString('id-ID')}`)
+      )
+    )
   );
 }
 
-// ── Mount the React app into <div id="root"> ────────────────
-const root = ReactDOM.createRoot(document.getElementById('root'));
-root.render(<App />);
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
