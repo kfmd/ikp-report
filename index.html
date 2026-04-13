@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Laporan Indeks Kepuasan Masyarakat – RSU Islam Klaten" />
+  <title>IKM Dashboard – RSU Islam Klaten</title>
+
+  <!-- ╔══════════════════════════════════════════════════════╗
+       ║  GOOGLE FONTS                                        ║
+       ║  Playfair Display = headings (elegant, authoritative)║
+       ║  Nunito           = body text (friendly, readable)   ║
+       ╚══════════════════════════════════════════════════════╝ -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Nunito:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <!-- ╔══════════════════════════════════════════════════════╗
+       ║  TAILWIND CSS (CDN – no install needed)              ║
+       ║  Provides utility classes like flex, grid, p-4, etc. ║
+       ╚══════════════════════════════════════════════════════╝ -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    // Extend Tailwind with our custom brand colors & fonts
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            heading: ['"Playfair Display"', 'Georgia', 'serif'],
+            body:    ['"Nunito"', 'system-ui', 'sans-serif'],
+          },
+          colors: {
+            brand: {
+              50:  '#f0fdf5', 100: '#dcfce9', 200: '#bbf7d2',
+              300: '#86efac', 400: '#4ade80', 500: '#22c55e',
+              600: '#16a34a', 700: '#15803d', 800: '#166534', 900: '#14532d',
+            },
+            gold: { 400: '#fbbf24', 500: '#f59e0b', 600: '#d97706' },
+          },
+        },
+      },
+    };
+  </script>
+
+  <!-- Custom CSS (brand styles, gauge, animations, etc.) -->
+  <link rel="stylesheet" href="style.css" />
+</head>
+
+<body class="bg-slate-50 font-body text-gray-800 min-h-screen">
+
+  <!-- React will render the entire app into this div -->
+  <div id="root"></div>
+
+  <!-- ── Scripts load order matters! ─────────────────────────────
+       1. Chart.js     → must be before app.js (app.js uses Chart)
+       2. data.js      → must be before app.js (app.js uses DataManager)
+       3. React        → must be before app.js
+       4. ReactDOM     → must be before app.js
+       5. Babel        → must be before app.js (compiles JSX)
+       6. app.js       → last, type="text/babel" enables JSX syntax
+       ──────────────────────────────────────────────────────────── -->
+
+  <!-- Chart.js v4 for bar charts and pie/doughnut charts -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+
+  <!-- Our data manager (fetching, parsing, caching) -->
+  <script src="data.js"></script>
+
+  <!-- React 18 (production builds – smaller and faster) -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+
+  <!-- Babel Standalone: allows JSX syntax directly in the browser.
+       ⚠️  For production at scale, pre-compile app.js with Vite/CRA instead. -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- React app (type="text/babel" tells Babel to compile the JSX) -->
+  <script type="text/babel" src="app.js"></script>
+
+</body>
+</html>

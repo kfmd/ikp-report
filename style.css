@@ -1,0 +1,288 @@
+/* ============================================================
+   IKM Dashboard – RSU Islam Klaten
+   Custom Styles  (Tailwind handles layout/spacing utilities)
+   ============================================================ */
+
+/* ── CSS Design Tokens (change these to rebrand the app) ──── */
+:root {
+  --brand-primary:   #14532d;   /* Dark green – brand identity      */
+  --brand-mid:       #16a34a;   /* Medium green                     */
+  --brand-light:     #22c55e;   /* Light green                      */
+  --brand-accent:    #f59e0b;   /* Gold accent                      */
+  --text-primary:    #111827;
+  --text-muted:      #6b7280;
+  --surface:         #ffffff;
+  --surface-muted:   #f9fafb;
+  --border:          #e5e7eb;
+  --shadow-card:     0 1px 4px rgba(0,0,0,0.07), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-elevated: 0 4px 20px rgba(0,0,0,0.09), 0 2px 4px rgba(0,0,0,0.04);
+  --radius:          14px;
+}
+
+/* ── Base ───────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  font-family: 'Nunito', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Typography ─────────────────────────────────────────── */
+h1, h2, h3, h4 {
+  font-family: 'Playfair Display', Georgia, serif;
+  line-height: 1.3;
+}
+
+/* ── Cards ──────────────────────────────────────────────── */
+.card {
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  transition: box-shadow 0.2s ease;
+}
+.card:hover            { box-shadow: var(--shadow-elevated); }
+.card-elevated         { box-shadow: var(--shadow-elevated) !important; }
+.card-no-overflow      { overflow: visible; }
+
+/* ── App Header ─────────────────────────────────────────── */
+.app-header {
+  background: linear-gradient(135deg, var(--brand-primary) 0%, #1a6b3c 55%, var(--brand-light) 130%);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Decorative glowing circles in the background */
+.app-header::before {
+  content: '';
+  position: absolute;
+  top: -80px; right: -80px;
+  width: 320px; height: 320px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
+  pointer-events: none;
+}
+.app-header::after {
+  content: '';
+  position: absolute;
+  bottom: -60px; left: -40px;
+  width: 240px; height: 240px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255,255,255,0.06) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+/* ── Month Selector Dropdown ────────────────────────────── */
+.month-selector {
+  background: rgba(255,255,255,0.18);
+  border: 1.5px solid rgba(255,255,255,0.35);
+  color: #ffffff;
+  border-radius: 8px;
+  padding: 7px 36px 7px 12px;
+  font-family: 'Nunito', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  outline: none;
+  transition: background 0.2s;
+  /* Custom dropdown arrow (white) */
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='white' viewBox='0 0 24 24'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+  background-size: 20px;
+}
+.month-selector:hover  { background-color: rgba(255,255,255,0.28); }
+.month-selector option { background: #ffffff; color: #111827; font-weight: 600; }
+
+/* ── Buttons ─────────────────────────────────────────────── */
+.btn-glass {
+  background: rgba(255,255,255,0.2);
+  border: 1.5px solid rgba(255,255,255,0.45);
+  color: #ffffff;
+  padding: 7px 14px;
+  border-radius: 8px;
+  font-family: 'Nunito', sans-serif;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.15s;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.btn-glass:hover   { background: rgba(255,255,255,0.32); transform: translateY(-1px); }
+.btn-glass:active  { transform: translateY(0); }
+.btn-glass:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+.btn-solid {
+  background: var(--brand-mid);
+  color: #ffffff;
+  padding: 7px 14px;
+  border-radius: 8px;
+  border: none;
+  font-family: 'Nunito', sans-serif;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.15s;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.btn-solid:hover { background: var(--brand-primary); transform: translateY(-1px); }
+
+/* ── Highlighted data values in text ────────────────────── */
+/* Applied to <strong> tags wrapping fetched data in paragraphs */
+.data-highlight {
+  font-weight: 700;
+  color: var(--brand-primary);
+}
+
+/* ── Section Divider ─────────────────────────────────────── */
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 8px 0;
+}
+.divider::before, .divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(to right, transparent, var(--border), transparent);
+}
+.divider-label {
+  font-family: 'Playfair Display', serif;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+}
+
+/* ── Status Dot (online/offline) ─────────────────────────── */
+.status-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 5px;
+  vertical-align: middle;
+}
+.status-dot.online  { background: #4ade80; animation: pulse-g 2s infinite; }
+.status-dot.offline { background: #f87171; }
+.status-dot.loading { background: #fbbf24; animation: pulse-g 0.8s infinite; }
+
+@keyframes pulse-g {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.6; transform: scale(1.4); }
+}
+
+/* ── Loading Spinner ─────────────────────────────────────── */
+.spinner {
+  width: 38px; height: 38px;
+  border: 3px solid #e5e7eb;
+  border-top-color: var(--brand-mid);
+  border-radius: 50%;
+  animation: spin 0.75s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Skeleton Shimmer ────────────────────────────────────── */
+.skeleton {
+  background: linear-gradient(90deg, #f0f0f0 25%, #e4e4e4 50%, #f0f0f0 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 6px;
+}
+@keyframes shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ── Aspect List Items ───────────────────────────────────── */
+.aspect-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--border);
+  transition: background 0.15s;
+}
+.aspect-row:last-child  { border-bottom: none; }
+.aspect-row:hover       { background: var(--surface-muted); border-radius: 8px; padding-left: 8px; }
+
+.aspect-num {
+  width: 26px; height: 26px;
+  background: var(--brand-primary);
+  color: #fff;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 800;
+  flex-shrink: 0;
+}
+
+.score-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* ── App Footer ──────────────────────────────────────────── */
+.app-footer {
+  background: var(--brand-primary);
+  color: rgba(255,255,255,0.65);
+  font-size: 11.5px;
+  padding: 13px 24px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  font-family: 'Nunito', sans-serif;
+}
+
+/* ── Report content header ───────────────────────────────── */
+.report-accent-line {
+  display: block;
+  width: 64px; height: 3px;
+  background: linear-gradient(to right, var(--brand-mid), var(--brand-accent));
+  border-radius: 2px;
+  margin: 12px auto 0;
+}
+
+/* ── Gauge container ─────────────────────────────────────── */
+.gauge-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 0;
+}
+
+/* ── Responsive overrides ────────────────────────────────── */
+@media (max-width: 640px) {
+  :root { --radius: 10px; }
+  .app-header { padding: 18px 16px !important; }
+}
+
+/* ── Print Styles ────────────────────────────────────────── */
+@media print {
+  .no-print { display: none !important; }
+  body { background: #fff; }
+  .app-header {
+    background: var(--brand-primary) !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .card { box-shadow: none; border: 1px solid #ddd; }
+}
