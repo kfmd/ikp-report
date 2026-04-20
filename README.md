@@ -17,58 +17,18 @@ ikm-dashboard/
 
 ---
 
-## Cara Menjalankan
-
-> ⚠️ **Tidak bisa dibuka langsung dengan double-click** karena browser memblokir fetch dari `file://`. Gunakan salah satu cara di bawah.
-
-### Cara 1 — VS Code Live Server (Rekomendasi)
-1. Install ekstensi **Live Server** di VS Code
-2. Buka folder `ikm-dashboard` di VS Code
-3. Klik kanan `index.html` → **Open with Live Server**
-4. Browser otomatis terbuka di `http://127.0.0.1:5500`
-
-### Cara 2 — Python
-```bash
-cd ikm-dashboard
-python -m http.server 8080
-# Buka: http://localhost:8080
-```
-
-### Cara 3 — Node.js
-```bash
-cd ikm-dashboard
-npx serve .
-```
-
-### Hosting Online
-Upload semua file ke: Netlify, Vercel, GitHub Pages, cPanel, atau server Apache/Nginx.
-
----
-
-## Google Sheets Setup
-
-Agar data dapat dibaca otomatis:
-1. Buka Google Sheets
-2. Klik **Share** (Bagikan) → **Anyone with the link** → **Viewer**
-3. Klik **Done**
-
-Sheet ID sudah dikonfigurasi di `app.js` (variabel `SHEET_ID`).
-
----
-
 ## Menambah/Mengubah Sheet Periode
 
 Di `app.js`, edit array `KNOWN_SHEETS`:
 
 ```js
-const KNOWN_SHEETS = [
-  'Juni 2025',
-  'Juli 2025',
-  // tambahkan nama sheet baru di sini
+const FALLBACK_SHEETS = [
+  { name: 'Juni 2025', gid: 'IDSHEET1' },
+  { name: 'Desember 2025', gid: 'IDSHEET2' },
 ];
 ```
 
-Nama harus **sama persis** dengan nama tab sheet di Google Sheets.
+Nama harus **sama persis** dengan nama tab sheet di Google Sheets. IDSHEET bisa dilihat dalam address bar setelah ganti sheet.
 
 ---
 
@@ -97,12 +57,11 @@ Nama harus **sama persis** dengan nama tab sheet di Google Sheets.
 
 ## Teknologi
 
-- **React 18** via CDN — antarmuka interaktif
-- **Chart.js 4** via CDN — grafik bar & doughnut
-- **Babel Standalone** — mengubah JSX menjadi JavaScript
-- **Plus Jakarta Sans** via Google Fonts — tipografi
-- **IndexedDB** — cache offline lokal
-- **Google Sheets CSV Export** — sumber data
+- **React 18**
+- **Chart.js 4**
+- **Babel Standalone**
+- **IndexedDB**
+- **Google Sheets CSV Export**
 
 ---
 

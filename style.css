@@ -404,6 +404,7 @@ table { border-collapse: collapse; width: 100%; }
 }
 .status-great { background: var(--color-success-light, #f0f7eb); color: var(--color-success); border: 1px solid rgba(67,122,34,0.2); }
 .status-good  { background: var(--color-gold-light); color: #92400e; border: 1px solid rgba(209,153,0,0.25); }
+.status-fair  { background: #fef9e7; color: #92400e; border: 1px solid rgba(209,153,0,0.25); }
 .status-poor  { background: var(--color-error-light); color: var(--color-error); border: 1px solid rgba(161,44,123,0.2); }
 
 /* ─── CONCLUSION ─────────────────────────────────────────────── */
@@ -474,6 +475,15 @@ table { border-collapse: collapse; width: 100%; }
 }
 .footer-ts { color: var(--color-text-faint); }
 
+.footer-link,
+.footer-link:visited{
+  color: #437a22;
+}
+
+.footer-link:hover{
+  color: #d19900;
+}
+
 /* ─── RESPONSIVE ─────────────────────────────────────────────── */
 @media (max-width: 768px) {
   .header-inner { gap: var(--space-3); }
@@ -510,4 +520,52 @@ table { border-collapse: collapse; width: 100%; }
 /* When embedded in an iframe, remove sticky header position to avoid clipping */
 @media (max-height: 600px) {
   .app-header { position: relative; }
+}
+
+/* ── Sheet discovery styles ── */
+.sheet-discovering {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface-offset);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+}
+
+.btn-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-offset);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background var(--transition-interactive), color var(--transition-interactive);
+  flex-shrink: 0;
+}
+
+.btn-icon:hover:not(:disabled) {
+  background: var(--color-surface-dynamic);
+  color: var(--color-text);
+}
+
+.btn-icon:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Proxy note banner */
+.proxy-note {
+  background: color-mix(in oklch, var(--color-gold) 10%, var(--color-surface));
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  padding: var(--space-2) var(--space-6);
+  border-top: 1px solid color-mix(in oklch, var(--color-gold) 20%, var(--color-border));
+  text-align: center;
 }
