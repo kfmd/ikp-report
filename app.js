@@ -392,15 +392,10 @@ function App() {
       <header className="app-header">
         <div className="header-inner">
           <div className="header-brand">
-            <svg className="header-logo" aria-label="RSU Islam Klaten" viewBox="0 0 48 48" fill="none">
-              <rect width="48" height="48" rx="12" fill="var(--color-primary)" />
-              <path d="M12 36V18l12-8 12 8v18" stroke="white" strokeWidth="2.5" strokeLinejoin="round" />
-              <rect x="19" y="24" width="10" height="12" rx="1" fill="white" fillOpacity="0.9" />
-              <path d="M22 20h4M24 18v4" stroke="white" strokeWidth="2" strokeLinecap="round" />
-            </svg>
+            <img src="rsi-logo.svg" className="header-logo" aria-label="RSU Islam Klaten"></img>
             <div>
               <h1 className="header-title">{d?.title || 'Survei Kepuasan Masyarakat'}</h1>
-              <p className="header-sub">RSU Islam Klaten · Indeks Kepuasan Masyarakat (IKM)</p>
+              <p className="header-sub">RSU Islam Klaten · Ramah, Amanah, Profesional, Islami (RAPI)</p>
             </div>
           </div>
           <div className="header-actions">
@@ -481,7 +476,7 @@ function App() {
                   <div className="legend-item"><span className="legend-dot" style={{ background: 'var(--color-gold)' }} /><span><strong>65,00 – 76,60</strong> — Kurang Baik (C)</span></div>
                   <div className="legend-item"><span className="legend-dot" style={{ background: 'var(--color-error)' }} /><span><strong>25,00 – 64,99</strong> — Tidak Baik (D)</span></div>
                   <div className="legend-divider" />
-                  <p className="legend-note">Skor merupakan rata-rata tertimbang dari {d.aspects?.length || 9} aspek penilaian.</p>
+                  <p className="legend-note">Skor merupakan rata-rata tertimbang dari {d.aspects?.length || 9} aspek penilaian. Nilai minimal standar nasional adalah &#x3E;76,6%</p>
                 </div>
               </div>
             </section>
@@ -556,12 +551,11 @@ function App() {
           </>
         )}
       </main>
-
       <footer className="app-footer">
         <p>RSU Islam Klaten · Laporan IKM {d?.month || selectedSheet?.name}</p>
+        <p>Dikembangkan oleh <a class="footer-link" href="https://kfmd.notion.site" target="_blank">dr. Khariz Fahrurrozi</a> & Tim IT RSU Islam Klaten</p>
         {cacheTs && <p className="footer-ts">Data diperbarui: {new Date(cacheTs).toLocaleString('id-ID', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>}
       </footer>
-
     </div>
   );
 }
